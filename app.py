@@ -67,104 +67,98 @@ if not uploaded:
     st.warning("No file uploaded yet. Please upload an Excel/CSV to continue.")
     st.stop()
 
-try:
-    with st.spinner("Reading your file..."):
-        if uploaded.name.lower().endswith(".csv"):
-            df = pd.read_csv(uploaded)
-        else:
-            df = pd.read_excel(uploaded)
+# Read file
+with st.spinner("Reading your file..."):
+    if uploaded.name.lower().endswith(".csv"):
+        df = pd.read_csv(uploaded)
+    else:
+        df = pd.read_excel(uploaded)
 
-    st.subheader("Data Preview")
-    st.dataframe(df.head(20), width="stretch")
+st.subheader("Data Preview")
+st.dataframe(df.head(20), width="stretch")
 
-    st.divider()
-    st.subheader("Map your columns")
+st.divider()
+st.subheader("Map your columns")
 
-    all_cols = list(df.columns)
+all_cols = list(df.columns)
 
-    member_guess = next(
-        (c for c in all_cols if str(c).lower().replace(" ", "") in ["memberno", "member_no", "membernumber"]),
-        None
+member_guess = next(
+    (c for c in all_cols if str(c).lower().replace(" ", "") in ["memberno", "member_no", "membernumber"]),
+    None
+)
+route_guess = next((c for c in all_cols if "route" in str(c).lower()), None)
+
+col_member = st.selectbox(
+    "Select Member No column",
+    all_cols,
+    index=all_cols.index(member_guess) if member_guess in all_cols else 0
+)
+col_route = st.selectbox(
+    "Select Route column",
+    all_cols,
+    index=all_cols.index(route_guess) if route_guess in all_cols else (1 if len(all_cols) > 1 else 0)
+)
+
+balance_candidates = guess_balance_columns(df)
+st.caption("Select 3 balance columns in chronological order (e.g., Nov → Dec → Jan).")
+
+def idx_or_zero(cols, val):
+    return cols.index(val) if val in cols else 0
+
+default_m1 = balance_candidates[0] if len(balance_candidates) > 0 else all_cols[0]
+default_m2 = balance_candidates[1] if len(balance_candidates) > 1 else all_cols[min(1, len(all_cols) - 1)]
+default_m3 = balance_candidates[2] if len(balance_candidates) > 2 else all_cols[min(2, len(all_cols) - 1)]
+
+col_m1 = st.selectbox("Month 1 balance column", balance_candidates, index=idx_or_zero(balance_candidates, default_m1))
+col_m2 = st.selectbox("Month 2 balance column", balance_candidates, index=idx_or_zero(balance_candidates, default_m2))
+col_m3 = st.selectbox("Month 3 balance column", balance_candidates, index=idx_or_zero(balance_candidates, default_m3))
+
+if len({col_m1, col_m2, col_m3}) < 3:
+    st.warning("Please select 3 DIFFERENT balance columns.")
+    st.stop()
+
+# Run
+if st.button("Run eligibility"):
+    with st.spinner("Computing eligibility..."):
+        out = compute_debt_eligibility(df, col_m1, col_m2, col_m3)
+
+        result_cols = [col_member, col_route, col_m1, col_m2, col_m3, "DebtEligibility", "Reason"]
+        result_cols = [c for c in result_cols if c in out.columns]
+        results = out[result_cols].copy()
+
+    st.subheader("Filter by Member No")
+
+    member_values = results[col_member].astype(str).dropna().unique().tolist()
+    member_values.sort()
+
+    selected_member = st.selectbox("Choose a Member No", ["(All)"] + member_values)
+
+    if selected_member != "(All)":
+        filtered = results[results[col_member].astype(str) == selected_member].copy()
+        st.success(f"Showing record for Member No: {selected_member}")
+        st.dataframe(filtered, width="stretch")
+
+        st.subheader("Member Snapshot")
+        st.write("Eligibility:", filtered["DebtEligibility"].iloc[0])
+        st.write("Reason:", filtered["Reason"].iloc[0])
+    else:
+        st.subheader("Results")
+        st.dataframe(results, width="stretch")
+
+    st.subheader("Summary")
+    summary = results["DebtEligibility"].value_counts(dropna=False).reset_index()
+    summary.columns = ["DebtEligibility", "Count"]
+    st.dataframe(summary, width="stretch")
+
+    towrite = io.BytesIO()
+    with pd.ExcelWriter(towrite, engine="openpyxl") as writer:
+        results.to_excel(writer, index=False, sheet_name="Results")
+        summary.to_excel(writer, index=False, sheet_name="Summary")
+    towrite.seek(0)
+
+    st.download_button(
+        "Download results (Excel)",
+        data=towrite,
+        file_name="debt_eligibility_results.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    route_guess = next((c for c in all_cols if "route" in str(c).lower()), None)
-
-    col_member = st.selectbox(
-        "Select Member No column",
-        all_cols,
-        index=all_cols.index(member_guess) if member_guess in all_cols else 0
-    )
-    col_route = st.selectbox(
-        "Select Route column",
-        all_cols,
-        index=all_cols.index(route_guess) if route_guess in all_cols else (1 if len(all_cols) > 1 else 0)
-    )
-
-    balance_candidates = guess_balance_columns(df)
-    st.caption("Select 3 balance columns in chronological order (e.g., Nov → Dec → Jan).")
-
-    def idx_or_zero(cols, val):
-        return cols.index(val) if val in cols else 0
-
-    default_m1 = balance_candidates[0] if len(balance_candidates) > 0 else all_cols[0]
-    default_m2 = balance_candidates[1] if len(balance_candidates) > 1 else all_cols[min(1, len(all_cols) - 1)]
-    default_m3 = balance_candidates[2] if len(balance_candidates) > 2 else all_cols[min(2, len(all_cols) - 1)]
-
-    col_m1 = st.selectbox("Month 1 balance column", balance_candidates, index=idx_or_zero(balance_candidates, default_m1))
-    col_m2 = st.selectbox("Month 2 balance column", balance_candidates, index=idx_or_zero(balance_candidates, default_m2))
-    col_m3 = st.selectbox("Month 3 balance column", balance_candidates, index=idx_or_zero(balance_candidates, default_m3))
-
-    if len({col_m1, col_m2, col_m3}) < 3:
-        st.warning("Please select 3 DIFFERENT balance columns.")
-        st.stop()
-
-    if st.button("Run eligibility"):
-        with st.spinner("Computing eligibility..."):
-            out = compute_debt_eligibility(df, col_m1, col_m2, col_m3)
-
-            result_cols = [col_member, col_route, col_m1, col_m2, col_m3, "DebtEligibility", "Reason"]
-            result_cols = [c for c in result_cols if c in out.columns]
-
-            results = out[result_cols].copy()
-
-st.subheader("Filter by Member No")
-
-# Make a clean list for selection (handles numeric/text member numbers)
-member_values = results[col_member].astype(str).dropna().unique().tolist()
-member_values.sort()
-
-selected_member = st.selectbox("Choose a Member No", ["(All)"] + member_values)
-
-if selected_member != "(All)":
-    filtered = results[results[col_member].astype(str) == selected_member].copy()
-    st.success(f"Showing record for Member No: {selected_member}")
-    st.dataframe(filtered, width="stretch")
-
-    st.subheader("Member Snapshot")
-    st.write("Eligibility:", filtered["DebtEligibility"].iloc[0])
-    st.write("Reason:", filtered["Reason"].iloc[0])
-
-else:
-    st.dataframe(results, width="stretch")
-
-
-        st.subheader("Summary")
-        summary = results["DebtEligibility"].value_counts(dropna=False).reset_index()
-        summary.columns = ["DebtEligibility", "Count"]
-        st.dataframe(summary, width="stretch")
-
-        towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine="openpyxl") as writer:
-            results.to_excel(writer, index=False, sheet_name="Results")
-            summary.to_excel(writer, index=False, sheet_name="Summary")
-        towrite.seek(0)
-
-        st.download_button(
-            "Download results (Excel)",
-            data=towrite,
-            file_name="debt_eligibility_results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-except Exception as e:
-    st.error(f"Error: {e}")
-
