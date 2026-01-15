@@ -126,8 +126,26 @@ try:
 
             results = out[result_cols].copy()
 
-        st.subheader("Results")
-        st.dataframe(results, width="stretch")
+st.subheader("Filter by Member No")
+
+# Make a clean list for selection (handles numeric/text member numbers)
+member_values = results[col_member].astype(str).dropna().unique().tolist()
+member_values.sort()
+
+selected_member = st.selectbox("Choose a Member No", ["(All)"] + member_values)
+
+if selected_member != "(All)":
+    filtered = results[results[col_member].astype(str) == selected_member].copy()
+    st.success(f"Showing record for Member No: {selected_member}")
+    st.dataframe(filtered, width="stretch")
+
+    st.subheader("Member Snapshot")
+    st.write("Eligibility:", filtered["DebtEligibility"].iloc[0])
+    st.write("Reason:", filtered["Reason"].iloc[0])
+
+else:
+    st.dataframe(results, width="stretch")
+
 
         st.subheader("Summary")
         summary = results["DebtEligibility"].value_counts(dropna=False).reset_index()
@@ -149,3 +167,4 @@ try:
 
 except Exception as e:
     st.error(f"Error: {e}")
+
