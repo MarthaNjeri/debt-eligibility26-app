@@ -88,11 +88,30 @@ member_guess = next(
 )
 route_guess = next((c for c in all_cols if "route" in str(c).lower()), None)
 
+# Try to detect member name column (optional)
+member_name_guess = next(
+    (c for c in all_cols if str(c).lower().strip() in ["member", "member name", "membername", "name"]),
+    None
+)
+
 col_member = st.selectbox(
     "Select Member No column",
     all_cols,
     index=all_cols.index(member_guess) if member_guess in all_cols else 0
 )
+
+# Only show Member Name selector if we detected a likely one
+if member_name_guess:
+    col_member_name = st.selectbox(
+        "Select Member Name column (optional)",
+        ["(None)"] + all_cols,
+        index=(["(None)"] + all_cols).index(member_name_guess)
+    )
+    if col_member_name == "(None)":
+        col_member_name = None
+else:
+    col_member_name = None
+
 col_route = st.selectbox(
     "Select Route column",
     all_cols,
@@ -122,7 +141,12 @@ if st.button("Run eligibility"):
     with st.spinner("Computing eligibility..."):
         out = compute_debt_eligibility(df, col_m1, col_m2, col_m3)
 
-        result_cols = [col_member, col_route, col_m1, col_m2, col_m3, "DebtEligibility", "Reason"]
+        # Build result columns
+        result_cols = [col_member]
+        if col_member_name:
+            result_cols.append(col_member_name)
+        result_cols += [col_route, col_m1, col_m2, col_m3, "DebtEligibility", "Reason"]
+
         result_cols = [c for c in result_cols if c in out.columns]
         results = out[result_cols].copy()
 
@@ -135,12 +159,16 @@ if st.button("Run eligibility"):
 
     if selected_member != "(All)":
         filtered = results[results[col_member].astype(str) == selected_member].copy()
-        st.success(f"Showing record for Member No: {selected_member}")
-        st.dataframe(filtered, width="stretch")
 
-        st.subheader("Member Snapshot")
-        st.write("Eligibility:", filtered["DebtEligibility"].iloc[0])
-        st.write("Reason:", filtered["Reason"].iloc[0])
+        # Show EXACT columns requested for filtered member
+        show_cols = [col_member]
+        if col_member_name and col_member_name in filtered.columns:
+            show_cols.append(col_member_name)
+        show_cols += [col_route, col_m1, col_m2, col_m3, "DebtEligibility"]
+
+        st.success(f"Record for Member No: {selected_member}")
+        st.dataframe(filtered[show_cols], width="stretch")
+
     else:
         st.subheader("Results")
         st.dataframe(results, width="stretch")
